@@ -45,6 +45,7 @@ class _GameScreenState extends State<GameScreen> {
   String _gender = '';
   int _age = 0;
   int _health = 90;
+  int _money = 0; // <-- NEW: Start life broke
   bool _isGenerating = false;
   
   // Crossroads Variables
@@ -62,18 +63,18 @@ class _GameScreenState extends State<GameScreen> {
 
   void _startNewLife() {
     _gender = Random().nextBool() ? 'Male' : 'Female';
+    _health = 90;
+    _money = 0; // <-- NEW: Reset bank account on new game
     _lifeHistory.clear();
     _lifeHistory.add("Year 0: You were born $_gender. You cry loudly, letting the world know you have arrived.");
   }
 
-  Future<void> _ageUp({String? playerChoice}) async {
+ Future<void> _ageUp({String? playerChoice}) async {
     if (_health <= 0) return;
 
     setState(() {
       _isGenerating = true;
-      if (playerChoice == null) {
-        _age++;
-      }
+      if (playerChoice == null) _age++;
     });
 
     try {
@@ -84,19 +85,19 @@ class _GameScreenState extends State<GameScreen> {
 
       if (playerChoice != null) {
         prompt = '''
-        The player is $_age years old, $_gender. Health: $_health/100.
+        The player is $_age years old, $_gender. Health: $_health/100. Wealth: \$$_money.
         They were faced with a choice and chose: "$playerChoice".
         Write a 2-sentence outcome of this choice. 
-        If it was a reckless or dangerous choice, include the exact text "[Health -15]" at the end.
-        If it was a very healthy or healing choice, include the exact text "[Health +10]" at the end.
+        If it was dangerous, include exactly "[Health -15]". If healthy, include "[Health +10]".
+        If it makes them money, include "[Money +X]" (replace X with amount). If it costs money, include "[Money -X]".
         ''';
       } else if (isCrossroads) {
         prompt = '''
-        The player just turned $_age. They are $_gender. Health: $_health/100.
-        Generate a major life dilemma appropriate for their age. 
+        The player just turned $_age. They are $_gender. Health: $_health/100. Wealth: \$$_money.
+        Generate a major life dilemma appropriate for their age and current wealth. 
         CRITICAL RULE: YOU MUST PROVIDE EXACTLY 3 DISTINCT CHOICES. DO NOT PROVIDE 2. 
         Make Choice 1 safe, Choice 2 risky, and Choice 3 weird or unexpected.
-        Format your response EXACTLY like this, with no extra text:
+        Format EXACTLY like this:
         EVENT: [2 sentence description of the dilemma]
         CHOICE: [First choice]
         CHOICE: [Second choice]
@@ -104,8 +105,9 @@ class _GameScreenState extends State<GameScreen> {
         ''';
       } else {
         prompt = '''
-        The player just turned $_age. They are $_gender. Health: $_health/100.
+        The player just turned $_age. They are $_gender. Health: $_health/100. Wealth: \$$_money.
         Write a single, 1-sentence life event that happens this year. Do not give choices.
+        If it makes them money, include "[Money +X]" (replace X with the number). If it costs money, include "[Money -X]".
         ''';
       }
 
@@ -119,21 +121,12 @@ class _GameScreenState extends State<GameScreen> {
           _currentChoices.clear(); 
           
           List<String> lines = responseText.split('\n');
-          
-          String eventText = lines.firstWhere(
-            (l) => l.startsWith('EVENT:'), 
-            orElse: () => 'EVENT: A sudden and mysterious situation arises.'
-          ).replaceAll('EVENT:', '').trim();
+          String eventText = lines.firstWhere((l) => l.startsWith('EVENT:'), orElse: () => 'EVENT: A situation arises.').replaceAll('EVENT:', '').trim();
           
           for (String line in lines) {
-            if (line.trim().startsWith('CHOICE:')) {
-              _currentChoices.add(line.replaceAll('CHOICE:', '').trim());
-            }
+            if (line.trim().startsWith('CHOICE:')) _currentChoices.add(line.replaceAll('CHOICE:', '').trim());
           }
-          
-          if (_currentChoices.isEmpty) {
-            _currentChoices = ["React calmly", "Take a big risk", "Do something completely unexpected"];
-          }
+          if (_currentChoices.isEmpty) _currentChoices = ["React calmly", "Take a big risk", "Do something completely unexpected"];
           
           _lifeHistory.add("Year $_age (CROSSROADS): $eventText");
         } else {
@@ -144,11 +137,15 @@ class _GameScreenState extends State<GameScreen> {
           if (responseText.contains('[Health +10]')) _health += 10;
           if (_health > 100) _health = 100; 
           
-          if (_age > 50 && playerChoice == null) _health -= 2; 
-          
-          if (_health <= 0) {
-            _lifeHistory.add("Year $_age: Your health has reached zero. You have passed away.");
+          // --- THE WEALTH EXTRACTOR ---
+          RegExp moneyRegex = RegExp(r'\[Money ([+-]\d+)\]');
+          Match? match = moneyRegex.firstMatch(responseText);
+          if (match != null) {
+            _money += int.parse(match.group(1)!);
           }
+          
+          if (_age > 50 && playerChoice == null) _health -= 2; 
+          if (_health <= 0) _lifeHistory.add("Year $_age: Your health has reached zero. You have passed away.");
         }
       });
 
@@ -157,7 +154,7 @@ class _GameScreenState extends State<GameScreen> {
       setState(() {
         String errorString = e.toString();
         if (errorString.contains('quota') || errorString.contains('429')) {
-          _lifeHistory.add("System Pause: The AI needs to catch its breath. Please wait 15 seconds before aging up again.");
+          _lifeHistory.add("System Pause: The AI needs to catch its breath. Please wait 15 seconds.");
         } else {
           _lifeHistory.add("System Error: The timeline fractured. Please try clicking again.");
         }
@@ -192,6 +189,7 @@ class _GameScreenState extends State<GameScreen> {
       body: Column(
         children: [
           // THE STATS BAR
+          // THE STATS BAR
           Container(
             padding: const EdgeInsets.all(16),
             color: Theme.of(context).colorScheme.surfaceContainerHighest,
@@ -202,6 +200,9 @@ class _GameScreenState extends State<GameScreen> {
                 Text('Gender: $_gender', style: const TextStyle(fontSize: 16, color: Colors.grey)),
                 Row(
                   children: [
+                    const Icon(Icons.attach_money, color: Colors.green),
+                    Text('$_money', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                    const SizedBox(width: 16),
                     const Icon(Icons.favorite, color: Colors.red),
                     const SizedBox(width: 8),
                     Text('$_health/100', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
@@ -219,13 +220,22 @@ class _GameScreenState extends State<GameScreen> {
               itemCount: _lifeHistory.length,
               itemBuilder: (context, index) {
                 bool isCrossroads = _lifeHistory[index].contains('(CROSSROADS)');
+                
+                // Hide the raw tags from the player's view
+                // Bulletproof scrubber: Hides the tags even if the AI adds weird spaces
+                String displayString = _lifeHistory[index]
+                    .replaceAll('[Health -15]', '')
+                    .replaceAll('[Health +10]', '')
+                    .replaceAll(RegExp(r'\[Money[^\]]*\]', caseSensitive: false), '')
+                    .trim();
+
                 return Card(
                   color: isCrossroads ? Colors.teal.withOpacity(0.2) : null,
                   margin: const EdgeInsets.only(bottom: 12),
                   child: Padding(
                     padding: const EdgeInsets.all(16.0),
                     child: Text(
-                      _lifeHistory[index].replaceAll('[Health -15]', '').replaceAll('[Health +10]', ''),
+                      displayString,
                       style: TextStyle(
                         fontSize: 16, 
                         fontWeight: isCrossroads ? FontWeight.bold : FontWeight.normal
@@ -236,7 +246,8 @@ class _GameScreenState extends State<GameScreen> {
               },
             ),
           ),
-
+          
+          
           // THE CONTROL PANEL
           Padding(
             padding: const EdgeInsets.all(24.0),
