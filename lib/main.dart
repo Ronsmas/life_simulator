@@ -45,7 +45,9 @@ class _GameScreenState extends State<GameScreen> {
   String _gender = '';
   int _age = 0;
   int _health = 90;
-  int _money = 0; // <-- NEW: Start life broke
+  int _money = 0; 
+  String _job = 'Unemployed'; // <-- NEW
+  int _salary = 0;            // <-- NEW
   bool _isGenerating = false;
   
   // Crossroads Variables
@@ -64,17 +66,23 @@ class _GameScreenState extends State<GameScreen> {
   void _startNewLife() {
     _gender = Random().nextBool() ? 'Male' : 'Female';
     _health = 90;
-    _money = 0; // <-- NEW: Reset bank account on new game
+    _money = 0; 
+    _job = 'Unemployed'; // <-- NEW: Reset job
+    _salary = 0;         // <-- NEW: Reset salary
     _lifeHistory.clear();
     _lifeHistory.add("Year 0: You were born $_gender. You cry loudly, letting the world know you have arrived.");
   }
 
- Future<void> _ageUp({String? playerChoice}) async {
+
+Future<void> _ageUp({String? playerChoice}) async {
     if (_health <= 0) return;
 
     setState(() {
       _isGenerating = true;
-      if (playerChoice == null) _age++;
+      if (playerChoice == null) {
+        _age++;
+        _money += _salary; // <-- NEW: You get paid every year!
+      }
     });
 
     try {
@@ -85,18 +93,19 @@ class _GameScreenState extends State<GameScreen> {
 
       if (playerChoice != null) {
         prompt = '''
-        The player is $_age years old, $_gender. Health: $_health/100. Wealth: \$$_money.
-        They were faced with a choice and chose: "$playerChoice".
-        Write a 2-sentence outcome of this choice. 
-        If it was dangerous, include exactly "[Health -15]". If healthy, include "[Health +10]".
-        If it makes them money, include "[Money +X]" (replace X with amount). If it costs money, include "[Money -X]".
+        The player is $_age years old, $_gender. Health: $_health/100. Wealth: \$$_money. Job: $_job (\$$_salary/yr).
+        They chose: "$playerChoice". Write a 2-sentence outcome. 
+        If dangerous, include "[Health -15]". If healthy, include "[Health +10]".
+        If it makes/costs a one-time amount, include "[Money +X]" or "[Money -X]".
+        If they get a new job, include "[Set Job: Job Title]" and "[Set Salary: Amount]".
+        If they get fired, include "[Set Job: Unemployed]" and "[Set Salary: 0]".
         ''';
       } else if (isCrossroads) {
         prompt = '''
-        The player just turned $_age. They are $_gender. Health: $_health/100. Wealth: \$$_money.
-        Generate a major life dilemma appropriate for their age and current wealth. 
-        CRITICAL RULE: YOU MUST PROVIDE EXACTLY 3 DISTINCT CHOICES. DO NOT PROVIDE 2. 
-        Make Choice 1 safe, Choice 2 risky, and Choice 3 weird or unexpected.
+        The player just turned $_age. Health: $_health/100. Wealth: \$$_money. Job: $_job (\$$_salary/yr).
+        Generate a major life dilemma. 
+        CRITICAL RULE: PROVIDE EXACTLY 3 DISTINCT CHOICES. 
+        Make Choice 1 safe, Choice 2 risky, and Choice 3 weird.
         Format EXACTLY like this:
         EVENT: [2 sentence description of the dilemma]
         CHOICE: [First choice]
@@ -105,9 +114,11 @@ class _GameScreenState extends State<GameScreen> {
         ''';
       } else {
         prompt = '''
-        The player just turned $_age. They are $_gender. Health: $_health/100. Wealth: \$$_money.
+        The player just turned $_age. Health: $_health/100. Wealth: \$$_money. Job: $_job (\$$_salary/yr).
         Write a single, 1-sentence life event that happens this year. Do not give choices.
-        If it makes them money, include "[Money +X]" (replace X with the number). If it costs money, include "[Money -X]".
+        If it makes/costs a one-time amount, include "[Money +X]" or "[Money -X]".
+        If they get a new job, include "[Set Job: Job Title]" and "[Set Salary: Amount]".
+        If they get fired, include "[Set Job: Unemployed]" and "[Set Salary: 0]".
         ''';
       }
 
@@ -137,12 +148,18 @@ class _GameScreenState extends State<GameScreen> {
           if (responseText.contains('[Health +10]')) _health += 10;
           if (_health > 100) _health = 100; 
           
-          // --- THE WEALTH EXTRACTOR ---
+          // --- THE SYSTEM EXTRACTORS ---
           RegExp moneyRegex = RegExp(r'\[Money ([+-]\d+)\]');
-          Match? match = moneyRegex.firstMatch(responseText);
-          if (match != null) {
-            _money += int.parse(match.group(1)!);
-          }
+          Match? moneyMatch = moneyRegex.firstMatch(responseText);
+          if (moneyMatch != null) _money += int.parse(moneyMatch.group(1)!);
+
+          RegExp jobRegex = RegExp(r'\[Set Job: ([^\]]+)\]');
+          Match? jobMatch = jobRegex.firstMatch(responseText);
+          if (jobMatch != null) _job = jobMatch.group(1)!.trim();
+
+          RegExp salaryRegex = RegExp(r'\[Set Salary: (\d+)\]');
+          Match? salaryMatch = salaryRegex.firstMatch(responseText);
+          if (salaryMatch != null) _salary = int.parse(salaryMatch.group(1)!);
           
           if (_age > 50 && playerChoice == null) _health -= 2; 
           if (_health <= 0) _lifeHistory.add("Year $_age: Your health has reached zero. You have passed away.");
@@ -189,25 +206,31 @@ class _GameScreenState extends State<GameScreen> {
       body: Column(
         children: [
           // THE STATS BAR
-          // THE STATS BAR
           Container(
             padding: const EdgeInsets.all(16),
             color: Theme.of(context).colorScheme.surfaceContainerHighest,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
+            child: Column(
               children: [
-                Text('Age: $_age', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                Text('Gender: $_gender', style: const TextStyle(fontSize: 16, color: Colors.grey)),
                 Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
-                    const Icon(Icons.attach_money, color: Colors.green),
-                    Text('$_money', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                    const SizedBox(width: 16),
-                    const Icon(Icons.favorite, color: Colors.red),
-                    const SizedBox(width: 8),
-                    Text('$_health/100', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                    Text('Age: $_age', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                    Text('Gender: $_gender', style: const TextStyle(fontSize: 16, color: Colors.grey)),
+                    Row(
+                      children: [
+                        const Icon(Icons.attach_money, color: Colors.green),
+                        Text('$_money', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                        const SizedBox(width: 16),
+                        const Icon(Icons.favorite, color: Colors.red),
+                        const SizedBox(width: 8),
+                        Text('$_health/100', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                      ],
+                    ),
                   ],
                 ),
+                const SizedBox(height: 8),
+                // NEW: The Career Bar
+                Text('$_job | \$$_salary / year', style: const TextStyle(fontSize: 16, color: Colors.teal, fontWeight: FontWeight.w600)),
               ],
             ),
           ),
@@ -221,12 +244,13 @@ class _GameScreenState extends State<GameScreen> {
               itemBuilder: (context, index) {
                 bool isCrossroads = _lifeHistory[index].contains('(CROSSROADS)');
                 
-                // Hide the raw tags from the player's view
-                // Bulletproof scrubber: Hides the tags even if the AI adds weird spaces
+                // Bulletproof scrubber for ALL tags
                 String displayString = _lifeHistory[index]
                     .replaceAll('[Health -15]', '')
                     .replaceAll('[Health +10]', '')
                     .replaceAll(RegExp(r'\[Money[^\]]*\]', caseSensitive: false), '')
+                    .replaceAll(RegExp(r'\[Set Job:[^\]]*\]', caseSensitive: false), '')
+                    .replaceAll(RegExp(r'\[Set Salary:[^\]]*\]', caseSensitive: false), '')
                     .trim();
 
                 return Card(
