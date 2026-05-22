@@ -46,8 +46,9 @@ class _GameScreenState extends State<GameScreen> {
   int _age = 0;
   int _health = 90;
   int _money = 0; 
-  String _job = 'Unemployed'; // <-- NEW
-  int _salary = 0;            // <-- NEW
+  String _job = 'Unemployed'; 
+  int _salary = 0;            
+  List<String> _inventory = []; // <--- NEW: The Asset locker
   bool _isGenerating = false;
   
   // Crossroads Variables
@@ -67,8 +68,9 @@ class _GameScreenState extends State<GameScreen> {
     _gender = Random().nextBool() ? 'Male' : 'Female';
     _health = 90;
     _money = 0; 
-    _job = 'Unemployed'; // <-- NEW: Reset job
-    _salary = 0;         // <-- NEW: Reset salary
+    _job = 'Unemployed'; 
+    _salary = 0;         
+    _inventory.clear(); // <-- NEW: Empty pockets at birth
     _lifeHistory.clear();
     _lifeHistory.add("Year 0: You were born $_gender. You cry loudly, letting the world know you have arrived.");
   }
@@ -81,7 +83,7 @@ Future<void> _ageUp({String? playerChoice}) async {
       _isGenerating = true;
       if (playerChoice == null) {
         _age++;
-        _money += _salary; // <-- NEW: You get paid every year!
+        _money += _salary; 
       }
     });
 
@@ -90,35 +92,36 @@ Future<void> _ageUp({String? playerChoice}) async {
       
       bool isCrossroads = _age % 5 == 0 && _age > 0 && playerChoice == null;
       String prompt = '';
+      
+      // Tell the AI what we own so it doesn't offer us a car if we have one
+      String assets = _inventory.isEmpty ? "None" : _inventory.join(', ');
 
       if (playerChoice != null) {
         prompt = '''
-        The player is $_age years old, $_gender. Health: $_health/100. Wealth: \$$_money. Job: $_job (\$$_salary/yr).
+        Player is $_age yrs old, $_gender. Health: $_health/100. Wealth: \$$_money. Job: $_job. Assets: $assets.
         They chose: "$playerChoice". Write a 2-sentence outcome. 
         If dangerous, include "[Health -15]". If healthy, include "[Health +10]".
         If it makes/costs a one-time amount, include "[Money +X]" or "[Money -X]".
-        If they get a new job, include "[Set Job: Job Title]" and "[Set Salary: Amount]".
-        If they get fired, include "[Set Job: Unemployed]" and "[Set Salary: 0]".
+        If they get a job, include "[Set Job: Title]" and "[Set Salary: Amount]".
+        If they purchase an item/property, include exactly "[Buy: Item Name, Cost]". Example: [Buy: Used Car, 5000]
         ''';
       } else if (isCrossroads) {
         prompt = '''
-        The player just turned $_age. Health: $_health/100. Wealth: \$$_money. Job: $_job (\$$_salary/yr).
-        Generate a major life dilemma. 
+        Player just turned $_age. Health: $_health/100. Wealth: \$$_money. Job: $_job. Assets: $assets.
+        Generate a major life dilemma. Since they have \$$_money, occasionally offer expensive things to buy.
         CRITICAL RULE: PROVIDE EXACTLY 3 DISTINCT CHOICES. 
-        Make Choice 1 safe, Choice 2 risky, and Choice 3 weird.
         Format EXACTLY like this:
-        EVENT: [2 sentence description of the dilemma]
+        EVENT: [2 sentence description]
         CHOICE: [First choice]
         CHOICE: [Second choice]
         CHOICE: [Third choice]
         ''';
       } else {
         prompt = '''
-        The player just turned $_age. Health: $_health/100. Wealth: \$$_money. Job: $_job (\$$_salary/yr).
-        Write a single, 1-sentence life event that happens this year. Do not give choices.
-        If it makes/costs a one-time amount, include "[Money +X]" or "[Money -X]".
-        If they get a new job, include "[Set Job: Job Title]" and "[Set Salary: Amount]".
-        If they get fired, include "[Set Job: Unemployed]" and "[Set Salary: 0]".
+        Player just turned $_age. Health: $_health/100. Wealth: \$$_money. Job: $_job. Assets: $assets.
+        Write a single, 1-sentence life event. Do not give choices.
+        If it makes/costs money, include "[Money +X]" or "[Money -X]".
+        If they get a job, include "[Set Job: Title]" and "[Set Salary: Amount]".
         ''';
       }
 
@@ -148,7 +151,7 @@ Future<void> _ageUp({String? playerChoice}) async {
           if (responseText.contains('[Health +10]')) _health += 10;
           if (_health > 100) _health = 100; 
           
-          // --- THE SYSTEM EXTRACTORS ---
+          // --- THE EXTRACTORS ---
           RegExp moneyRegex = RegExp(r'\[Money ([+-]\d+)\]');
           Match? moneyMatch = moneyRegex.firstMatch(responseText);
           if (moneyMatch != null) _money += int.parse(moneyMatch.group(1)!);
@@ -161,6 +164,16 @@ Future<void> _ageUp({String? playerChoice}) async {
           Match? salaryMatch = salaryRegex.firstMatch(responseText);
           if (salaryMatch != null) _salary = int.parse(salaryMatch.group(1)!);
           
+          // NEW: The Purchase Extractor
+          RegExp buyRegex = RegExp(r'\[Buy: ([^,]+),\s*(\d+)\]');
+          Match? buyMatch = buyRegex.firstMatch(responseText);
+          if (buyMatch != null) {
+            String item = buyMatch.group(1)!.trim();
+            int cost = int.parse(buyMatch.group(2)!);
+            _inventory.add(item);
+            _money -= cost; // Deduct the money!
+          }
+
           if (_age > 50 && playerChoice == null) _health -= 2; 
           if (_health <= 0) _lifeHistory.add("Year $_age: Your health has reached zero. You have passed away.");
         }
@@ -229,8 +242,15 @@ Future<void> _ageUp({String? playerChoice}) async {
                   ],
                 ),
                 const SizedBox(height: 8),
-                // NEW: The Career Bar
                 Text('$_job | \$$_salary / year', style: const TextStyle(fontSize: 16, color: Colors.teal, fontWeight: FontWeight.w600)),
+                
+                // NEW: The Asset Display (Only shows up if you own something)
+                if (_inventory.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  const Divider(),
+                  const SizedBox(height: 4),
+                  Text('Assets: ${_inventory.join(', ')}', style: const TextStyle(fontSize: 14, color: Colors.grey)),
+                ]
               ],
             ),
           ),
@@ -244,13 +264,14 @@ Future<void> _ageUp({String? playerChoice}) async {
               itemBuilder: (context, index) {
                 bool isCrossroads = _lifeHistory[index].contains('(CROSSROADS)');
                 
-                // Bulletproof scrubber for ALL tags
+                // Bulletproof scrubber for ALL tags, including the new Buy tag
                 String displayString = _lifeHistory[index]
                     .replaceAll('[Health -15]', '')
                     .replaceAll('[Health +10]', '')
                     .replaceAll(RegExp(r'\[Money[^\]]*\]', caseSensitive: false), '')
                     .replaceAll(RegExp(r'\[Set Job:[^\]]*\]', caseSensitive: false), '')
                     .replaceAll(RegExp(r'\[Set Salary:[^\]]*\]', caseSensitive: false), '')
+                    .replaceAll(RegExp(r'\[Buy:[^\]]*\]', caseSensitive: false), '')
                     .trim();
 
                 return Card(
