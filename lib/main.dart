@@ -41,14 +41,15 @@ class _GameScreenState extends State<GameScreen> {
   static final String apiKey = dotenv.env['GEMINI_API_KEY'] ?? 'KEY_NOT_FOUND';
   // ---------------------------------------------------------
 
-  // --- GAME STATE ---
+// --- GAME STATE ---
   String _gender = '';
   int _age = 0;
   int _health = 90;
   int _money = 0; 
   String _job = 'Unemployed'; 
   int _salary = 0;            
-  List<String> _inventory = []; // <--- NEW: The Asset locker
+  List<String> _inventory = []; 
+  Map<String, int> _relationships = {}; // <-- NEW: The Social Ledger
   bool _isGenerating = false;
   
   // Crossroads Variables
@@ -70,7 +71,8 @@ class _GameScreenState extends State<GameScreen> {
     _money = 0; 
     _job = 'Unemployed'; 
     _salary = 0;         
-    _inventory.clear(); // <-- NEW: Empty pockets at birth
+    _inventory.clear(); 
+    _relationships.clear(); // <-- NEW: You are born knowing nobody
     _lifeHistory.clear();
     _lifeHistory.add("Year 0: You were born $_gender. You cry loudly, letting the world know you have arrived.");
   }
@@ -91,24 +93,29 @@ Future<void> _ageUp({String? playerChoice}) async {
       final model = GenerativeModel(model: 'gemini-2.5-flash', apiKey: apiKey);
       
       bool isCrossroads = _age % 5 == 0 && _age > 0 && playerChoice == null;
-      String prompt = '';
       
-      // Tell the AI what we own so it doesn't offer us a car if we have one
+      // Tell the AI what you own and who you know
       String assets = _inventory.isEmpty ? "None" : _inventory.join(', ');
+      String relations = _relationships.isEmpty ? "None" : _relationships.entries.map((e) => "${e.key} (${e.value}/100)").join(', ');
+      
+      String prompt = '';
 
       if (playerChoice != null) {
         prompt = '''
-        Player is $_age yrs old, $_gender. Health: $_health/100. Wealth: \$$_money. Job: $_job. Assets: $assets.
+        Player: $_age yrs old, $_gender. Health: $_health. Wealth: \$$_money. Job: $_job. Assets: $assets.
+        Relationships: $relations.
         They chose: "$playerChoice". Write a 2-sentence outcome. 
         If dangerous, include "[Health -15]". If healthy, include "[Health +10]".
-        If it makes/costs a one-time amount, include "[Money +X]" or "[Money -X]".
-        If they get a job, include "[Set Job: Title]" and "[Set Salary: Amount]".
-        If they purchase an item/property, include exactly "[Buy: Item Name, Cost]". Example: [Buy: Used Car, 5000]
+        If money changes, include "[Money +X]" or "[Money -X]".
+        If job changes, include "[Set Job: Title]" and "[Set Salary: Amount]".
+        If they buy an item, include "[Buy: Item, Cost]".
+        If they meet someone new or a relationship changes, include exactly "[Rel: Person Name, +X]" or "[Rel: Person Name, -X]". Example: [Rel: Noel, +15]
         ''';
       } else if (isCrossroads) {
         prompt = '''
-        Player just turned $_age. Health: $_health/100. Wealth: \$$_money. Job: $_job. Assets: $assets.
-        Generate a major life dilemma. Since they have \$$_money, occasionally offer expensive things to buy.
+        Player just turned $_age. Health: $_health. Wealth: \$$_money. Job: $_job. Assets: $assets.
+        Relationships: $relations.
+        Generate a major life dilemma. Incorporate their existing relationships or introduce new NPCs.
         CRITICAL RULE: PROVIDE EXACTLY 3 DISTINCT CHOICES. 
         Format EXACTLY like this:
         EVENT: [2 sentence description]
@@ -118,10 +125,11 @@ Future<void> _ageUp({String? playerChoice}) async {
         ''';
       } else {
         prompt = '''
-        Player just turned $_age. Health: $_health/100. Wealth: \$$_money. Job: $_job. Assets: $assets.
-        Write a single, 1-sentence life event. Do not give choices.
-        If it makes/costs money, include "[Money +X]" or "[Money -X]".
-        If they get a job, include "[Set Job: Title]" and "[Set Salary: Amount]".
+        Player just turned $_age. Health: $_health. Wealth: \$$_money. Job: $_job. Assets: $assets.
+        Relationships: $relations.
+        Write a single, 1-sentence life event. Do not give choices. 
+        If money changes, include "[Money +X]" or "[Money -X]".
+        If a relationship changes or starts, include "[Rel: Name, +X]" or "[Rel: Name, -X]". 
         ''';
       }
 
@@ -164,14 +172,20 @@ Future<void> _ageUp({String? playerChoice}) async {
           Match? salaryMatch = salaryRegex.firstMatch(responseText);
           if (salaryMatch != null) _salary = int.parse(salaryMatch.group(1)!);
           
-          // NEW: The Purchase Extractor
           RegExp buyRegex = RegExp(r'\[Buy: ([^,]+),\s*(\d+)\]');
           Match? buyMatch = buyRegex.firstMatch(responseText);
           if (buyMatch != null) {
-            String item = buyMatch.group(1)!.trim();
-            int cost = int.parse(buyMatch.group(2)!);
-            _inventory.add(item);
-            _money -= cost; // Deduct the money!
+            _inventory.add(buyMatch.group(1)!.trim());
+            _money -= int.parse(buyMatch.group(2)!); 
+          }
+
+          // NEW: The Social Extractor (Using allMatches for multiple NPCs)
+          RegExp relRegex = RegExp(r'\[Rel:\s*([^,]+),\s*([+-]\d+)\]');
+          for (Match m in relRegex.allMatches(responseText)) {
+            String person = m.group(1)!.trim();
+            int change = int.parse(m.group(2)!);
+            int currentScore = _relationships[person] ?? 50; // Strangers start at 50
+            _relationships[person] = (currentScore + change).clamp(0, 100); // Keeps score between 0 and 100
           }
 
           if (_age > 50 && playerChoice == null) _health -= 2; 
@@ -182,8 +196,7 @@ Future<void> _ageUp({String? playerChoice}) async {
       _scrollToBottom();
     } catch (e) {
       setState(() {
-        String errorString = e.toString();
-        if (errorString.contains('quota') || errorString.contains('429')) {
+        if (e.toString().contains('quota') || e.toString().contains('429')) {
           _lifeHistory.add("System Pause: The AI needs to catch its breath. Please wait 15 seconds.");
         } else {
           _lifeHistory.add("System Error: The timeline fractured. Please try clicking again.");
@@ -191,9 +204,7 @@ Future<void> _ageUp({String? playerChoice}) async {
         if (playerChoice == null) _age--; 
       });
     } finally {
-      setState(() {
-        _isGenerating = false;
-      });
+      setState(() { _isGenerating = false; });
     }
   }
 
@@ -244,12 +255,32 @@ Future<void> _ageUp({String? playerChoice}) async {
                 const SizedBox(height: 8),
                 Text('$_job | \$$_salary / year', style: const TextStyle(fontSize: 16, color: Colors.teal, fontWeight: FontWeight.w600)),
                 
-                // NEW: The Asset Display (Only shows up if you own something)
+                // The Asset Display 
                 if (_inventory.isNotEmpty) ...[
                   const SizedBox(height: 8),
                   const Divider(),
-                  const SizedBox(height: 4),
                   Text('Assets: ${_inventory.join(', ')}', style: const TextStyle(fontSize: 14, color: Colors.grey)),
+                ],
+
+                // NEW: The Social Ledger Display
+                if (_relationships.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    alignment: WrapAlignment.center,
+                    children: _relationships.entries.map((e) {
+                      // Green for good friends, Red for enemies, Orange for neutral
+                      Color relColor = e.value >= 70 ? Colors.green : (e.value <= 30 ? Colors.red : Colors.orange);
+                      return Chip(
+                        label: Text('${e.key}: ${e.value}', style: const TextStyle(fontSize: 12)),
+                        avatar: Icon(Icons.person, size: 14, color: relColor),
+                        backgroundColor: relColor.withOpacity(0.1),
+                        side: BorderSide.none,
+                        padding: EdgeInsets.zero,
+                      );
+                    }).toList(),
+                  ),
                 ]
               ],
             ),
@@ -264,7 +295,7 @@ Future<void> _ageUp({String? playerChoice}) async {
               itemBuilder: (context, index) {
                 bool isCrossroads = _lifeHistory[index].contains('(CROSSROADS)');
                 
-                // Bulletproof scrubber for ALL tags, including the new Buy tag
+                // Bulletproof scrubber for ALL tags, including the new Rel tag
                 String displayString = _lifeHistory[index]
                     .replaceAll('[Health -15]', '')
                     .replaceAll('[Health +10]', '')
@@ -272,6 +303,7 @@ Future<void> _ageUp({String? playerChoice}) async {
                     .replaceAll(RegExp(r'\[Set Job:[^\]]*\]', caseSensitive: false), '')
                     .replaceAll(RegExp(r'\[Set Salary:[^\]]*\]', caseSensitive: false), '')
                     .replaceAll(RegExp(r'\[Buy:[^\]]*\]', caseSensitive: false), '')
+                    .replaceAll(RegExp(r'\[Rel:[^\]]*\]', caseSensitive: false), '')
                     .trim();
 
                 return Card(
