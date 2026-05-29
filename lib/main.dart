@@ -207,7 +207,83 @@ Future<void> _ageUp({String? playerChoice}) async {
       setState(() { _isGenerating = false; });
     }
   }
+  
+Future<void> _openRiskMarket({String? wagerChoice}) async {
+    if (_health <= 0 || _money <= 0 && wagerChoice == null) {
+      setState(() {
+        _lifeHistory.add("System: You don't have enough money to enter the Risk Market.");
+      });
+      _scrollToBottom();
+      return;
+    }
 
+    setState(() {
+      _isGenerating = true;
+    });
+
+    try {
+      final model = GenerativeModel(model: 'gemini-2.5-flash', apiKey: apiKey);
+      String prompt = '';
+
+      if (wagerChoice != null) {
+        prompt = '''
+        The player has \$$_money. They made this wager in the Risk Market: "$wagerChoice".
+        Determine if they won or lost based on realistic football match probabilities. 
+        Write a thrilling 2-sentence outcome describing the match climax (e.g., a late goal, a crucial red card, or unexpected player fouls).
+        If they won the bet, include exactly "[Money +X]" (where X is their profit). 
+        If they lost, include exactly "[Money -X]" (where X is the wager amount lost).
+        ''';
+      } else {
+        prompt = '''
+        The player has \$$_money and wants to place a sports bet. 
+        Generate a high-stakes European football betting scenario. Mention specific tactical elements like team form, defensive setups, or a heated rivalry.
+        CRITICAL RULE: YOU MUST PROVIDE EXACTLY 3 DISTINCT CHOICES.
+        Format EXACTLY like this:
+        EVENT: [2 sentence description of the upcoming match and the current odds]
+        CHOICE: [Safe bet - e.g., Bet \$50 on the heavy favorites]
+        CHOICE: [Risky tactical bet - e.g., Bet \$200 on high player fouls or the underdog]
+        CHOICE: [Walk away without betting]
+        ''';
+      }
+
+      final content = [Content.text(prompt)];
+      final response = await model.generateContent(content);
+      final responseText = response.text?.trim() ?? '';
+
+      setState(() {
+        if (wagerChoice == null && responseText.contains('EVENT:')) {
+          _awaitingChoice = true;
+          _currentChoices.clear(); 
+          
+          List<String> lines = responseText.split('\n');
+          String eventText = lines.firstWhere((l) => l.startsWith('EVENT:'), orElse: () => 'EVENT: The bookies post the odds.').replaceAll('EVENT:', '').trim();
+          
+          for (String line in lines) {
+            if (line.trim().startsWith('CHOICE:')) _currentChoices.add(line.replaceAll('CHOICE:', '').trim());
+          }
+          if (_currentChoices.isEmpty) _currentChoices = ["Bet \$50", "Bet \$200", "Walk away"];
+          
+          _lifeHistory.add("RISK MARKET: $eventText");
+        } else {
+          // Resolve the wager
+          _awaitingChoice = false;
+          _lifeHistory.add("MATCH RESULT: $responseText");
+          
+          RegExp moneyRegex = RegExp(r'\[Money ([+-]\d+)\]');
+          Match? moneyMatch = moneyRegex.firstMatch(responseText);
+          if (moneyMatch != null) _money += int.parse(moneyMatch.group(1)!);
+        }
+      });
+
+      _scrollToBottom();
+    } catch (e) {
+      setState(() {
+        _lifeHistory.add("System Error: The bookies closed the market. Try again later.");
+      });
+    } finally {
+      setState(() { _isGenerating = false; });
+    }
+  }
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
@@ -335,12 +411,16 @@ Future<void> _ageUp({String? playerChoice}) async {
                   : _awaitingChoice 
                       ? Column(
                           children: _currentChoices.map((choice) {
+                            // If we are in the risk market, route the choice back to the market logic
+                            bool isRiskChoice = _lifeHistory.last.startsWith("RISK MARKET:");
                             return Padding(
                               padding: const EdgeInsets.only(bottom: 12.0),
                               child: ElevatedButton(
-                                onPressed: () => _ageUp(playerChoice: choice),
+                                onPressed: () => isRiskChoice ? _openRiskMarket(wagerChoice: choice) : _ageUp(playerChoice: choice),
                                 style: ElevatedButton.styleFrom(
                                   minimumSize: const Size(double.infinity, 50),
+                                  backgroundColor: isRiskChoice ? Colors.orange.shade800 : Theme.of(context).colorScheme.primary,
+                                  foregroundColor: Colors.white,
                                   padding: const EdgeInsets.all(16)
                                 ),
                                 child: Text(choice, textAlign: TextAlign.center, style: const TextStyle(fontSize: 15)),
@@ -348,17 +428,39 @@ Future<void> _ageUp({String? playerChoice}) async {
                             );
                           }).toList(),
                         )
-                      : ElevatedButton(
-                          onPressed: _health <= 0 ? null : () => _ageUp(),
-                          style: ElevatedButton.styleFrom(
-                            minimumSize: const Size(double.infinity, 60),
-                            backgroundColor: _health <= 0 ? Colors.grey : Theme.of(context).colorScheme.primary,
-                            foregroundColor: Theme.of(context).colorScheme.onPrimary,
-                          ),
-                          child: Text(
-                            _health <= 0 ? 'GAME OVER' : 'AGE UP ( +1 Year )', 
-                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)
-                          ),
+                      : Row(
+                          children: [
+                            Expanded(
+                              flex: 2,
+                              child: ElevatedButton(
+                                onPressed: _health <= 0 ? null : () => _ageUp(),
+                                style: ElevatedButton.styleFrom(
+                                  minimumSize: const Size(0, 60),
+                                  backgroundColor: _health <= 0 ? Colors.grey : Theme.of(context).colorScheme.primary,
+                                  foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                                ),
+                                child: Text(
+                                  _health <= 0 ? 'GAME OVER' : 'AGE UP ( +1 Year )', 
+                                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)
+                                ),
+                              ),
+                            ),
+                            if (_age >= 18) ...[
+                              const SizedBox(width: 12),
+                              Expanded(
+                                flex: 1,
+                                child: ElevatedButton(
+                                  onPressed: _health <= 0 || _money <= 0 ? null : () => _openRiskMarket(),
+                                  style: ElevatedButton.styleFrom(
+                                    minimumSize: const Size(0, 60),
+                                    backgroundColor: Colors.orange.shade700,
+                                    foregroundColor: Colors.white,
+                                  ),
+                                  child: const Icon(Icons.sports_soccer, size: 30),
+                                ),
+                              ),
+                            ]
+                          ],
                         ),
             ),
           ),
