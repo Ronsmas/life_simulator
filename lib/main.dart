@@ -16,12 +16,16 @@ class LifeSimulatorApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Life Simulator',
+      debugShowCheckedModeBanner: false, // Hides that red DEBUG banner!
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.teal,
-          brightness: Brightness.dark,
+        brightness: Brightness.dark, // 1. SLEEK DARK MODE
+        colorSchemeSeed: Colors.tealAccent, // 2. Neon accent color
+        scaffoldBackgroundColor: const Color(0xFF0F0F0F), // 3. True deep black background
+        cardTheme: const CardThemeData(
+          color: Color(0xFF1A1A1A), // Slightly lighter cards for contrast
+          elevation: 4,
+          shadowColor: Colors.black,
         ),
-        useMaterial3: true,
       ),
       home: const GameScreen(),
     );
@@ -308,37 +312,48 @@ Future<void> _openRiskMarket({String? wagerChoice}) async {
           // THE STATS BAR
           Container(
             padding: const EdgeInsets.all(16),
-            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            color: Colors.black45, // Sleeker transparent bar
             child: Column(
               children: [
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
-                    Text('Age: $_age', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                    Text('Gender: $_gender', style: const TextStyle(fontSize: 16, color: Colors.grey)),
+                    Text('Age: $_age', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
+                    Text('$_gender', style: const TextStyle(fontSize: 16, color: Colors.grey)),
                     Row(
                       children: [
-                        const Icon(Icons.attach_money, color: Colors.green),
-                        Text('$_money', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                        const Icon(Icons.attach_money, color: Colors.greenAccent),
+                        // ANIMATION 1: The popping money counter
+                        AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 300),
+                          transitionBuilder: (Widget child, Animation<double> animation) {
+                            return ScaleTransition(scale: animation, child: child);
+                          },
+                          child: Text(
+                            '$_money', 
+                            key: ValueKey<int>(_money), // Tells Flutter the number changed
+                            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)
+                          ),
+                        ),
                         const SizedBox(width: 16),
-                        const Icon(Icons.favorite, color: Colors.red),
+                        const Icon(Icons.favorite, color: Colors.redAccent),
                         const SizedBox(width: 8),
-                        Text('$_health/100', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                        Text('$_health/100', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
                       ],
                     ),
                   ],
                 ),
                 const SizedBox(height: 8),
-                Text('$_job | \$$_salary / year', style: const TextStyle(fontSize: 16, color: Colors.teal, fontWeight: FontWeight.w600)),
+                Text('$_job | \$$_salary / year', style: const TextStyle(fontSize: 16, color: Colors.tealAccent, fontWeight: FontWeight.w600)),
                 
                 // The Asset Display 
                 if (_inventory.isNotEmpty) ...[
                   const SizedBox(height: 8),
-                  const Divider(),
+                  const Divider(color: Colors.white12),
                   Text('Assets: ${_inventory.join(', ')}', style: const TextStyle(fontSize: 14, color: Colors.grey)),
                 ],
 
-                // NEW: The Social Ledger Display
+                // The Social Ledger Display
                 if (_relationships.isNotEmpty) ...[
                   const SizedBox(height: 8),
                   Wrap(
@@ -346,14 +361,12 @@ Future<void> _openRiskMarket({String? wagerChoice}) async {
                     runSpacing: 4,
                     alignment: WrapAlignment.center,
                     children: _relationships.entries.map((e) {
-                      // Green for good friends, Red for enemies, Orange for neutral
-                      Color relColor = e.value >= 70 ? Colors.green : (e.value <= 30 ? Colors.red : Colors.orange);
+                      Color relColor = e.value >= 70 ? Colors.greenAccent : (e.value <= 30 ? Colors.redAccent : Colors.orangeAccent);
                       return Chip(
-                        label: Text('${e.key}: ${e.value}', style: const TextStyle(fontSize: 12)),
+                        label: Text('${e.key}: ${e.value}', style: const TextStyle(fontSize: 12, color: Colors.white)),
                         avatar: Icon(Icons.person, size: 14, color: relColor),
-                        backgroundColor: relColor.withOpacity(0.1),
-                        side: BorderSide.none,
-                        padding: EdgeInsets.zero,
+                        backgroundColor: relColor.withOpacity(0.15),
+                        side: BorderSide(color: relColor.withOpacity(0.3)),
                       );
                     }).toList(),
                   ),
@@ -370,8 +383,8 @@ Future<void> _openRiskMarket({String? wagerChoice}) async {
               itemCount: _lifeHistory.length,
               itemBuilder: (context, index) {
                 bool isCrossroads = _lifeHistory[index].contains('(CROSSROADS)');
+                bool isRiskMarket = _lifeHistory[index].contains('RISK MARKET:');
                 
-                // Bulletproof scrubber for ALL tags, including the new Rel tag
                 String displayString = _lifeHistory[index]
                     .replaceAll('[Health -15]', '')
                     .replaceAll('[Health +10]', '')
@@ -382,20 +395,49 @@ Future<void> _openRiskMarket({String? wagerChoice}) async {
                     .replaceAll(RegExp(r'\[Rel:[^\]]*\]', caseSensitive: false), '')
                     .trim();
 
-                return Card(
-                  color: isCrossroads ? Colors.teal.withOpacity(0.2) : null,
+                Widget card = Card(
+                  color: isCrossroads ? Colors.tealAccent.withOpacity(0.1) : (isRiskMarket ? Colors.orange.withOpacity(0.1) : null),
                   margin: const EdgeInsets.only(bottom: 12),
+                  shape: RoundedRectangleBorder(
+                    side: BorderSide(
+                      color: isCrossroads ? Colors.tealAccent.withOpacity(0.5) : (isRiskMarket ? Colors.orangeAccent.withOpacity(0.5) : Colors.transparent),
+                      width: 1,
+                    ),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                   child: Padding(
                     padding: const EdgeInsets.all(16.0),
                     child: Text(
                       displayString,
                       style: TextStyle(
                         fontSize: 16, 
-                        fontWeight: isCrossroads ? FontWeight.bold : FontWeight.normal
+                        color: Colors.white70,
+                        fontWeight: isCrossroads || isRiskMarket ? FontWeight.bold : FontWeight.normal
                       ),
                     ),
                   ),
                 );
+
+                // ANIMATION 2: Only animate the very newest card being added
+                if (index == _lifeHistory.length - 1) {
+                  return TweenAnimationBuilder(
+                    duration: const Duration(milliseconds: 500),
+                    tween: Tween<double>(begin: 0, end: 1),
+                    curve: Curves.easeOutCubic,
+                    builder: (context, double value, child) {
+                      return Opacity(
+                        opacity: value,
+                        child: Transform.translate(
+                          offset: Offset(0, 30 * (1 - value)), // Slides up 30 pixels
+                          child: child,
+                        ),
+                      );
+                    },
+                    child: card,
+                  );
+                }
+                
+                return card; // Old cards just render normally without re-animating
               },
             ),
           ),
